@@ -688,6 +688,24 @@ app.get('/getPOIIDsByCategory',function (req,res) {
         })
 });
 
+app.post('/add_review_to_POI',function (req,res) {
+    var reviewID=req.body['reviewID'], content=req.body['content'],
+        Date=req.body['Date'], rating=req.body['rating'], poi_id=req.body['poi_id'], username=req.body['username'];
+    var review_values = [surround_with_quotes(reviewID),surround_with_quotes(content),surround_with_quotes(Date),surround_with_quotes(rating),surround_with_quotes(poi_id),surround_with_quotes(username)];
+    //check all paramaters recieved
+    if(!(reviewID && content && date && rating && poiId && userName  )){
+        res.status(400).send('missing parameters')
+    }
+    else {
+        var insert_review_query = get_insert_query('reviews', review_column_names,review_values);
+        console.log(util.format("ATTEMPTING TO EXECUTE QUERY:\n%s", insert_review_query));
+        DButilsAzure.execQuery(insert_review_query)
+            .then(function (result) {
+                res.status(200).send('review added successfully');
+            })
 
-
-//app.createTable()
+            .catch(function (err) {
+                res.send(err);
+            })
+    }
+});
