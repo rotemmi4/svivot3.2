@@ -13,6 +13,7 @@ app.use(bodyParser.json()); // support json encoded bodies
 const user_column_names = ['User_name','First_name','Last_name','City','Country', 'Password', 'Email', 'favPOI1', 'favPOI2', 'token'];
 const userInterest_column_names = ['User_name', 'Category_name'];
 const review_column_names = ['reviewID','content','Date','rating','POI_ID','User_name'];
+const userFavorites_column_names = ['User_name', 'POI_ID', 'POI_name'];
 var port = 3000;
 app.listen(port, function () {
     console.log('Example app listening on port ' + port);
@@ -76,7 +77,6 @@ let select_query = (table_name,cols_to_select_array, where_conditions_array) => 
         })
     );
 };
-
 
 let update_query = (table_name,columnToUpdate, where_conditions_array, newValue) => {
     return new Promise(
@@ -671,7 +671,7 @@ app.post('/add_review_to_POI',function (req,res) {
 
 
 });
-app.get('/getPOIIDsByCategory',function (req,res) {
+app.get('/get_POIIDs_ByCategory',function (req,res) {
     var categoryName = req.body['category'];
     select_query('POI','*',[util.format('Category_name=\'%s\'', categoryName)])
         .then(function (result) {
@@ -703,9 +703,123 @@ app.post('/add_review_to_POI',function (req,res) {
             .then(function (result) {
                 res.status(200).send('review added successfully');
             })
-
             .catch(function (err) {
                 res.send(err);
             })
     }
 });
+
+app.get('/get_Validation_questions', function(req, res){
+    select_query('ValidationQuestions','*')
+        .then(function (result) {
+            var questions = [];
+            for (let i = 0; i < result.length; i++) {
+                questions.push(result[i]['que_description']);
+            }
+            var json_to_send = {questions:questions};
+            res.json(json_to_send);
+        })
+        .catch(function (err) {
+            console.log(err);
+            res.send(err);
+        })
+});
+
+app.get('/get_POI_Picture',function (req,res) {
+    var poi_name = req.body['poi_name'];
+    select_query('POI','Picture',[util.format('name=\'%s\'', poi_name)])
+        .then(function (result) {
+            res.send(result);
+        })
+        .catch(function (error) {
+            res.send(error);
+        })
+});
+
+app.post('/save_user_favorites',function (req,res) {
+    var username=req.body['username'], poi_id=req.body['poi_id'], poi_name=req.body['poi_name'];
+    var save_values = [surround_with_quotes(username),surround_with_quotes(poi_id),surround_with_quotes(poi_name)];
+    //check all paramaters recieved
+    if(!(username && poi_id && poi_name)){
+        res.status(400).send('missing parameters')
+    }
+    else {
+        var inset_user_query = get_insert_query('userFavorites', userFavorites_column_names, save_values);
+        console.log(util.format("ATTEMPTING TO EXECUTE QUERY:\n%s",inset_user_query));
+        DButilsAzure.execQuery(inset_user_query)
+            .then(function (result1) {
+                        res.status(200).send('saving favorites completed successfully');
+                    })
+                    .catch(function (err1) {
+                        var delete_where_conditions=[];
+                        for (let i = 0; i < user_column_names.length; i++) {
+                            delete_where_conditions.push(util.format('%s=%s',userFavorites_column_names[i],(save_values[i])));
+                        }
+                        delete_query('users',delete_where_conditions)
+                            .then(function (result2) {
+                                res.send(err1 + '\nsaving is not completed')
+                            })
+                            .catch(function (err2) {
+                                res.send(util.format('First error:\n%s\nSecond Error:%s\nFavorite CREATED, Favorite is NOT DELETED',err1,err2))
+                            })
+                    })
+            .catch(function (err) {
+                res.send(err);
+            })
+    }
+});
+
+app.get('/get_FavoritePOIs',function (req,res) {
+    var categories = req.body['categories'];
+    var sorted_by_rating = (req.body['sorted_by_rating'] && (typeof req.body['sorted_by_rating'] === 'string' || req.body['sorted_by_rating'] instanceof String) && req.body['sorted_by_rating'].toLowerCase() === 'true');
+    var rating_range = req.body["rating range"];
+    var where_conditions = [];
+    if(categories){
+        var categories_surrounded_by_quotes = [];
+        for (let i = 0; i < categories.length; i++) {
+            categories_surrounded_by_quotes.push(surround_with_quotes(categories[i]))
+        }
+        where_conditions.push(util.format("Category_name in (%s)",categories_surrounded_by_quotes.join(', ')));
+    }
+    if(rating_range){
+        where_conditions.push(util.format("(POI_ID IN (SELECT POI_ID FROM (SELECT POI_ID, AVG(cast(rating as decimal)) as avg FROM reviews GROUP BY POI_ID) WHERE avg BETWEEN %s AND %s)", rating_range['minimal_rating'],rating_range['maximal_rating']));
+    }
+    select_query('userFavorites', ['POI_ID'],where_conditions)
+        .then(function (desired_pois_as_tuple) {
+            var desired_pois = [];
+            for (let i = 0; i < desired_pois_as_tuple.length; i++) {
+                desired_pois.push(desired_pois_as_tuple[i]['POI_ID']);
+            }
+            var poi_ids = [];
+            console.log("sorted by rating: " + sorted_by_rating);
+            if (sorted_by_rating){
+                sort_pois_by_avg_rating()
+                    .then(function (sorted_pois) {
+                        for (let i = 0; i < sorted_pois.length; i++) {
+                            if([sorted_pois[i] in desired_pois])
+                                poi_ids.push(sorted_pois[i])
+                        }
+                        for (let i = 0; i < desired_pois[i]; i++) {
+                            if(!(desired_pois[i]) in poi_ids){
+                                poi_ids.push(desired_pois[i]);
+                            }
+                        }
+                        var json_to_return = {poi_ids:poi_ids};
+                        res.json(json_to_return)
+                    })
+                    .catch(function (err) {
+                        res.status(500).send(err)
+                    })
+            }
+            else {
+                poi_ids = desired_pois;
+                console.log('length: '+poi_ids.length);
+                var json_to_return = {poi_ids:poi_ids};
+                res.json(json_to_return)
+            }
+        })
+        .catch(function (err) {
+            res.status(500).send(err)
+        })
+});
+
