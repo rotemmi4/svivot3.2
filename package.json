@@ -1,0 +1,19 @@
+{
+  "name": "AzureDB",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^1.19.0",
+    "express": "^4.17.1",
+    "jsonwebtoken": "^8.5.1",
+    "tedious": "^6.1.1",
+    "tedious-connection-pool": "^1.0.5"
+  }
+}
